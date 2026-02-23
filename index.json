@@ -3,7 +3,7 @@
     "id": "nimegami",
     "name": "Nimegami",
     "description": "Nimegami.id is an Indonesian anime streaming provider with Sub Indo content",
-    "manifestURI": "https://raw.githubusercontent.com/yogap/seanime-extensions/refs/heads/main/extensions/nimegami/nimegami.json",
+    "manifestURI": "https://raw.githubusercontent.com/Cnagnn/seanime-extensions/refs/heads/main/extensions/nimegami/nimegami.json",
     "version": "1.0.0",
     "author": "",
     "type": "onlinestream-provider",
