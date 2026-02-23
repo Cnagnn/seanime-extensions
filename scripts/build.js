@@ -70,23 +70,17 @@ function buildIndex() {
         const manifestURI = `${baseRawUrl}/extensions/${dir}/${dir}.json`
         const payloadURI = `${baseRawUrl}/extensions/${dir}/${sourceFileName}`
 
-        // Update the individual manifest file with correct URIs
-        manifest.manifestURI = manifestURI
-        manifest.payloadURI = payloadURI
-        delete manifest.payload // Use payloadURI instead
-        fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + "\n", "utf8")
-
-        // Read the source code and embed it for the index
+        // Read the source code
         const sourceCode = fs.readFileSync(sourceFile, "utf8")
 
-        // Build the index entry (with inline payload for marketplace compatibility)
-        const indexEntry = {
-            ...manifest,
-            payload: sourceCode,
-        }
-        delete indexEntry.payloadURI // Index uses inline payload
+        // Update the individual manifest file with correct URIs and inline payload
+        manifest.manifestURI = manifestURI
+        manifest.payload = sourceCode
+        delete manifest.payloadURI
+        fs.writeFileSync(manifestFile, JSON.stringify(manifest, null, 2) + "\n", "utf8")
 
-        extensions.push(indexEntry)
+        // Build the index entry (same as individual manifest)
+        extensions.push({ ...manifest })
         console.log(`✅ ${manifest.name} (${manifest.id}) v${manifest.version} — ${manifest.type}`)
     }
 
