@@ -213,6 +213,7 @@ class Provider {
         }
 
         // Build video sources from each resolution
+        // We need to fetch each berkasdrive streaming page to extract the direct mp4 URL
         for (const entry of streamData) {
             if (!entry.url || entry.url.length === 0) continue
 
@@ -223,8 +224,15 @@ class Provider {
                 const serverLabel = entry.url.length > 1 ? ` Server ${i + 1}` : ""
                 const quality = `${entry.format}${serverLabel}`
 
+                // Fetch the berkasdrive streaming page and extract the direct mp4 URL
+                const directUrl = await this.extractDirectVideoUrl(streamUrl)
+                if (!directUrl) {
+                    console.error(`Failed to extract direct URL for ${quality}:`, streamUrl)
+                    continue
+                }
+
                 result.videoSources.push({
-                    url: streamUrl,
+                    url: directUrl,
                     type: "mp4",
                     quality: quality,
                     subtitles: [],
@@ -237,6 +245,56 @@ class Provider {
         }
 
         return result
+    }
+
+    /**
+     * Fetch a berkasdrive streaming page and extract the direct mp4 URL
+     * The streaming page uses a Plyr player with a <source> tag containing the actual mp4 URL
+     */
+    private async extractDirectVideoUrl(streamPageUrl: string): Promise<string> {
+        try {
+            const res = await fetch(streamPageUrl)
+            if (!res.ok) {
+                console.error("Failed to fetch streaming page:", res.status)
+                return ""
+            }
+
+            const html = res.text()
+            const $ = LoadDoc(html)
+
+            // Look for <source> element inside <video> tag
+            let directUrl = ""
+
+            $("video source").each((_, el) => {
+                const src = el.attr("src") || ""
+                if (src && (src.includes(".mp4") || src.includes("berkasdrive") || src.includes("miterequest"))) {
+                    directUrl = src
+                }
+            })
+
+            // Fallback: try to find the src attribute on the video element itself
+            if (!directUrl) {
+                $("video").each((_, el) => {
+                    const src = el.attr("src") || ""
+                    if (src && src.length > 0) {
+                        directUrl = src
+                    }
+                })
+            }
+
+            // Fallback: look for mp4 URL in page source using regex
+            if (!directUrl) {
+                const mp4Match = html.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/i)
+                if (mp4Match && mp4Match[0]) {
+                    directUrl = mp4Match[0]
+                }
+            }
+
+            return directUrl
+        } catch (e) {
+            console.error("Error extracting direct video URL:", e)
+            return ""
+        }
     }
 
     /**
