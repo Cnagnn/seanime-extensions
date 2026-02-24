@@ -22,7 +22,7 @@ class Provider {
             return []
         }
 
-        const html = res.text()
+        const html = await res.text()
         const $ = LoadDoc(html)
         const results: SearchResult[] = []
 
@@ -60,7 +60,7 @@ class Provider {
             throw new Error(`Failed to fetch anime page: ${res.status}`)
         }
 
-        const html = res.text()
+        const html = await res.text()
         const $ = LoadDoc(html)
         const episodes: EpisodeDetails[] = []
 
@@ -75,6 +75,8 @@ class Provider {
                 const epTitle = el.text().trim()
 
                 if (!epUrl) continue
+                // Skip non-episode links (batch, lengkap, etc.)
+                if (!epUrl.includes("/episode/")) continue
 
                 const epSlug = this.extractSlug(epUrl, "episode")
                 if (!epSlug) continue
@@ -181,9 +183,9 @@ class Provider {
 
         // 5. AJAX Step 2 - Get Iframe Base64
         const formData2 = new URLSearchParams()
-        formData2.append("id", decodedPayload.id || "")
-        formData2.append("i", decodedPayload.i || "")
-        formData2.append("q", decodedPayload.q || "")
+        formData2.append("id", String(decodedPayload.id || ""))
+        formData2.append("i", String(decodedPayload.i || ""))
+        formData2.append("q", String(decodedPayload.q || ""))
         formData2.append("nonce", nonce)
         formData2.append("action", actionIframe)
 
