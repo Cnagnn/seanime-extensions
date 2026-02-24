@@ -139,6 +139,7 @@ class Provider {
         }
         const actionNonce = actionNonceMatch[1]
         const actionIframe = actionIframeMatch[1]
+        console.error("[DBG] Actions:", actionNonce, actionIframe)
 
         // 2. Collect ALL mirrors with data-content
         const mirrorRegex = /data-content="([A-Za-z0-9+/=]+)"/g
@@ -158,6 +159,7 @@ class Provider {
         if (mirrors.length === 0) {
             throw new Error("No mirrors found for this episode")
         }
+        console.error("[DBG] Mirrors found:", mirrors.length)
 
         // 3. AJAX Step 1 - Get Nonce
         const formData1 = new URLSearchParams()
@@ -180,6 +182,7 @@ class Provider {
         const ajaxData1 = await ajaxRes.json()
         const nonce = ajaxData1?.data
         if (!nonce) throw new Error("Failed to obtain nonce")
+        console.error("[DBG] Nonce:", nonce)
 
         // 4. Try each mirror to get a working video source
         // Group by quality, try first mirror per quality
@@ -204,10 +207,17 @@ class Provider {
                     body: formData2.toString(),
                     headers: ajaxHeaders
                 })
-                if (!ajaxRes2.ok) continue
+                if (!ajaxRes2.ok) {
+                    console.error("[DBG] AJAX2 failed:", ajaxRes2.status)
+                    continue
+                }
 
                 const ajaxData2 = await ajaxRes2.json()
-                if (!ajaxData2?.data) continue
+                if (!ajaxData2?.data) {
+                    console.error("[DBG] AJAX2 no data:", JSON.stringify(ajaxData2))
+                    continue
+                }
+                console.error("[DBG] AJAX2 data len:", String(ajaxData2.data).length)
 
                 // Decode iframe base64
                 let iframeHtml = ""
@@ -218,13 +228,21 @@ class Provider {
 
                 // Extract iframe src
                 const srcMatch = iframeHtml.match(/src="([^"]+)"/)
-                if (!srcMatch) continue
+                if (!srcMatch) {
+                    console.error("[DBG] No src in iframe:", iframeHtml.substring(0, 200))
+                    continue
+                }
                 let iframeUrl = srcMatch[1]
+                console.error("[DBG] Iframe URL:", iframeUrl)
 
                 // Fetch the iframe content
                 const iframeRes = await fetch(iframeUrl)
-                if (!iframeRes.ok) continue
+                if (!iframeRes.ok) {
+                    console.error("[DBG] Iframe fetch failed:", iframeRes.status)
+                    continue
+                }
                 const iframeContent = await iframeRes.text()
+                console.error("[DBG] Iframe content length:", iframeContent.length)
 
                 // Try to extract video URL from the iframe content
                 let videoUrl = ""
