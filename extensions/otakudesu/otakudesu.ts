@@ -129,9 +129,10 @@ class Provider {
         const html = await res.text()
 
         // 1. Extract AJAX action strings from inline script
-        // Pattern: action:"<hex>" for nonce, and action:"<hex>" for iframe
-        const actionNonceMatch = html.match(/\{action:"([a-f0-9]{20,})"}\)\.done\(\(\{data:.\}\)=>\{window\.__x__nonce/)
-        const actionIframeMatch = html.match(/action:"([a-f0-9]{20,})"}\)\.done\(\(\{data:.\}\)=>\{document/)
+        // The nonce action appears in: data:{action:"<hex>"}}).done(({data:a})=>{window.__x__nonce
+        // The iframe action appears in: action:"<hex>"}}).done(({data:a})=>{document
+        const actionNonceMatch = html.match(/\{action:"([a-f0-9]{20,})"\}\}\)\.done\([^)]+\)=>\{window\.__x__nonce/)
+        const actionIframeMatch = html.match(/action:"([a-f0-9]{20,})"\}\}\)\.done\([^)]+\)=>\{document/)
 
         if (!actionNonceMatch || !actionIframeMatch) {
             throw new Error("Could not find AJAX action strings")
