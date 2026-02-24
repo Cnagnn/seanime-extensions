@@ -13,42 +13,70 @@ class Provider {
 
     async search(opts: SearchOptions): Promise<SearchResult[]> {
         const query = encodeURIComponent(opts.query)
-        const url = `${this.baseUrl}/?s=${query}`
+        const url = `${this.baseUrl}/search/${query}/`
 
-        const res = await fetch(url)
+        const res = await fetch(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                "Referer": this.baseUrl,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+            }
+        })
         if (!res.ok) {
             console.error("Anoboy search failed:", res.status, res.statusText)
             return []
         }
 
         const html = await res.text()
-        const $ = LoadDoc(html)
         const results: SearchResult[] = []
+        const foundUrls = new Set<string>()
 
-        // Parse results from div.column-content a or div.amv a
-        $(".column-content a[href], .amv a[href]").each((_: any, el: any) => {
-            try {
-                const title = el.attr("title") || el.text().trim()
-                const articleUrl = el.attr("href") || ""
+        // Use regex to locate all links that contain the query
+        // This bypasses the need for accurate CSS selectors which frequently change or break via Cheerio
+        const aTagRegex = /<a[^>]+href=["'](https:\/\/anoboy\.be\/[^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi
+        let match
 
-                if (!title || !articleUrl) return
-                if (!articleUrl.includes("anoboy")) return
-                // Check if it's already in the results
-                if (results.find(r => r.url === articleUrl)) return
+        const qLower = opts.query.toLowerCase()
 
-                const slug = this.extractSlug(articleUrl)
-                if (!slug) return
+        while ((match = aTagRegex.exec(html)) !== null) {
+            const href = match[1]
+            const innerHtml = match[2]
 
-                results.push({
-                    id: slug,
-                    title: title,
-                    url: articleUrl,
-                    subOrDub: "sub",
-                })
-            } catch (e) {
-                console.error("Error parsing search result:", e)
+            // Skip categories, tags, authors, pagination
+            if (href.includes("/category/") || href.includes("/genre/") || href.includes("/author/") || href.includes("/page/")) {
+                continue
             }
-        })
+
+            // Must look like an anime link
+            if (href.length < 25) continue
+
+            // Try to extract title from text or title attribute
+            let titleStr = innerHtml.replace(/<[^>]+>/g, "").trim()
+
+            const titleAttrMatch = match[0].match(/title=["']([^"']+)["']/i)
+            if (titleAttrMatch) {
+                titleStr = titleAttrMatch[1]
+            }
+
+            if (!titleStr) continue
+
+            // Filter titles that actually contain the query or "episode" to ensure it's a post
+            const tLower = titleStr.toLowerCase()
+            if (tLower.includes(qLower) || tLower.includes("episode") || href.includes(qLower.replace(/\s+/g, '-'))) {
+                if (!foundUrls.has(href)) {
+                    const slug = this.extractSlug(href)
+                    if (slug && slug.length > 3) {
+                        foundUrls.add(href)
+                        results.push({
+                            id: slug,
+                            title: titleStr,
+                            url: href,
+                            subOrDub: "sub",
+                        })
+                    }
+                }
+            }
+        }
 
         return results
     }
