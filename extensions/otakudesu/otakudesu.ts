@@ -192,9 +192,9 @@ class Provider {
 
             try {
                 const formData2 = new URLSearchParams()
-                formData2.append("id", String(mirror.decoded.id || ""))
-                formData2.append("i", String(mirror.decoded.i || ""))
-                formData2.append("q", String(mirror.decoded.q || ""))
+                formData2.append("id", String(mirror.decoded.id ?? ""))
+                formData2.append("i", String(mirror.decoded.i ?? ""))
+                formData2.append("q", String(mirror.decoded.q ?? ""))
                 formData2.append("nonce", nonce)
                 formData2.append("action", actionIframe)
 
