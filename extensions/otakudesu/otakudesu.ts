@@ -120,6 +120,7 @@ class Provider {
             headers: {},
             videoSources: [],
         }
+        const dbg: string[] = []
 
         const res = await fetch(episode.url)
         if (!res.ok) {
@@ -127,10 +128,9 @@ class Provider {
         }
 
         const html = await res.text()
+        dbg.push("html:" + html.length)
 
         // 1. Extract AJAX action strings from inline script
-        // The nonce action appears in: data:{action:"<hex>"}}).done(({data:a})=>{window.__x__nonce
-        // The iframe action appears in: action:"<hex>"}}).done(({data:a})=>{document
         const actionNonceMatch = html.match(/\{action:"([a-f0-9]{20,})"\}\}\)\.done\([^)]+\)=>\{window\.__x__nonce/)
         const actionIframeMatch = html.match(/action:"([a-f0-9]{20,})"\}\}\)\.done\([^)]+\)=>\{document/)
 
@@ -139,7 +139,7 @@ class Provider {
         }
         const actionNonce = actionNonceMatch[1]
         const actionIframe = actionIframeMatch[1]
-        console.error("[DBG] Actions:", actionNonce, actionIframe)
+        dbg.push("actions:ok")
 
         // 2. Collect ALL mirrors with data-content
         const mirrorRegex = /data-content="([A-Za-z0-9+/=]+)"/g
@@ -152,23 +152,21 @@ class Provider {
                 const payload = JSON.parse(decodedStr)
                 mirrors.push({ dataContent: mirrorMatch[1], decoded: payload })
             } catch (e) {
-                // Skip invalid entries
+                dbg.push("mirror-err:" + mirrorMatch[1].substring(0, 20))
             }
         }
 
         if (mirrors.length === 0) {
-            throw new Error("No mirrors found for this episode")
+            throw new Error("No mirrors found. dbg=" + dbg.join("|"))
         }
-        console.error("[DBG] Mirrors found:", mirrors.length)
+        dbg.push("mirrors:" + mirrors.length)
 
         // 3. AJAX Step 1 - Get Nonce
         const formData1 = new URLSearchParams()
         formData1.append("action", actionNonce)
 
-        const ajaxHeaders = {
+        const ajaxHeaders: any = {
             "Content-Type": "application/x-www-form-urlencoded",
-            "Origin": "https://otakudesu.best",
-            "Referer": episode.url,
             "X-Requested-With": "XMLHttpRequest"
         }
 
@@ -177,15 +175,14 @@ class Provider {
             body: formData1.toString(),
             headers: ajaxHeaders
         })
-        if (!ajaxRes.ok) throw new Error("AJAX Step 1 failed")
+        if (!ajaxRes.ok) throw new Error("AJAX1 failed:" + ajaxRes.status)
 
         const ajaxData1 = await ajaxRes.json()
         const nonce = ajaxData1?.data
-        if (!nonce) throw new Error("Failed to obtain nonce")
-        console.error("[DBG] Nonce:", nonce)
+        if (!nonce) throw new Error("No nonce. dbg=" + dbg.join("|"))
+        dbg.push("nonce:ok")
 
         // 4. Try each mirror to get a working video source
-        // Group by quality, try first mirror per quality
         const triedQualities = new Set<string>()
 
         for (const mirror of mirrors) {
@@ -194,7 +191,6 @@ class Provider {
             triedQualities.add(q)
 
             try {
-                // AJAX Step 2 - Get Iframe
                 const formData2 = new URLSearchParams()
                 formData2.append("id", String(mirror.decoded.id || ""))
                 formData2.append("i", String(mirror.decoded.i || ""))
@@ -207,42 +203,42 @@ class Provider {
                     body: formData2.toString(),
                     headers: ajaxHeaders
                 })
-                if (!ajaxRes2.ok) {
-                    console.error("[DBG] AJAX2 failed:", ajaxRes2.status)
-                    continue
-                }
+                dbg.push("ajax2-" + q + ":" + ajaxRes2.status)
+                if (!ajaxRes2.ok) continue
 
                 const ajaxData2 = await ajaxRes2.json()
                 if (!ajaxData2?.data) {
-                    console.error("[DBG] AJAX2 no data:", JSON.stringify(ajaxData2))
+                    dbg.push("ajax2-nodata-" + q)
                     continue
                 }
-                console.error("[DBG] AJAX2 data len:", String(ajaxData2.data).length)
+                dbg.push("ajax2-data:" + String(ajaxData2.data).length)
 
                 // Decode iframe base64
                 let iframeHtml = ""
                 try {
                     const decoded = CryptoJS.enc.Base64.parse(ajaxData2.data)
                     iframeHtml = CryptoJS.enc.Utf8.stringify(decoded)
-                } catch (e) { continue }
+                    dbg.push("iframe-html:" + iframeHtml.length)
+                } catch (e) {
+                    dbg.push("b64-err")
+                    continue
+                }
 
                 // Extract iframe src
                 const srcMatch = iframeHtml.match(/src="([^"]+)"/)
                 if (!srcMatch) {
-                    console.error("[DBG] No src in iframe:", iframeHtml.substring(0, 200))
+                    dbg.push("no-src:" + iframeHtml.substring(0, 100))
                     continue
                 }
                 let iframeUrl = srcMatch[1]
-                console.error("[DBG] Iframe URL:", iframeUrl)
+                dbg.push("iframe-url:" + iframeUrl.substring(0, 60))
 
                 // Fetch the iframe content
                 const iframeRes = await fetch(iframeUrl)
-                if (!iframeRes.ok) {
-                    console.error("[DBG] Iframe fetch failed:", iframeRes.status)
-                    continue
-                }
+                dbg.push("iframe-status:" + iframeRes.status)
+                if (!iframeRes.ok) continue
                 const iframeContent = await iframeRes.text()
-                console.error("[DBG] Iframe content length:", iframeContent.length)
+                dbg.push("iframe-len:" + iframeContent.length)
 
                 // Try to extract video URL from the iframe content
                 let videoUrl = ""
@@ -253,6 +249,7 @@ class Provider {
                 if (bloggerMatch) {
                     videoUrl = bloggerMatch[1]
                     videoType = "video"
+                    dbg.push("blogger:found")
                 }
 
                 // Check for direct m3u8/mp4 URLs
@@ -261,6 +258,7 @@ class Provider {
                     if (m3u8Match) {
                         videoUrl = m3u8Match[1]
                         videoType = "m3u8"
+                        dbg.push("m3u8:found")
                     }
                 }
 
@@ -269,19 +267,24 @@ class Provider {
                     if (mp4Match) {
                         videoUrl = mp4Match[1]
                         videoType = "mp4"
+                        dbg.push("mp4:found")
                     }
                 }
 
                 // Check for packed VidHide script
                 if (!videoUrl) {
                     videoUrl = this.extractVidHideSource(iframeContent)
-                    if (videoUrl) videoType = "m3u8"
+                    if (videoUrl) {
+                        videoType = "m3u8"
+                        dbg.push("vidhide:found")
+                    }
                 }
 
                 // Fallback: use the desustream iframe URL directly
                 if (!videoUrl) {
                     videoUrl = iframeUrl
                     videoType = "video"
+                    dbg.push("fallback:iframe")
                 }
 
                 if (videoUrl) {
@@ -291,14 +294,15 @@ class Provider {
                         quality: q,
                         subtitles: []
                     })
+                    dbg.push("pushed:" + q)
                 }
-            } catch (e) {
-                console.error("Error processing mirror:", e)
+            } catch (e: any) {
+                dbg.push("catch:" + q + ":" + (e?.message || String(e)))
             }
         }
 
         if (result.videoSources.length === 0) {
-            throw new Error("No streaming sources found for this episode.")
+            throw new Error("No sources. dbg=" + dbg.join("|"))
         }
 
         return result
