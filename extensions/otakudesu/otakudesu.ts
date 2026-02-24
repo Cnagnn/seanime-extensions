@@ -84,11 +84,11 @@ class Provider {
                 let num = 0
                 const numMatch = epTitle.match(/Episode\s+(\d+(?:\.\d+)?)/i)
                 if (numMatch && numMatch[1]) {
-                    num = parseFloat(numMatch[1])
+                    num = Math.floor(parseFloat(numMatch[1]))
                 } else {
                     const match2 = epTitle.match(/(\d+(?:\.\d+)?)/)
                     if (match2 && match2[1]) {
-                        num = parseFloat(match2[1])
+                        num = Math.floor(parseFloat(match2[1]))
                     }
                 }
 
