@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>Player Video</title>
+  <style>
+    html, body {
+      margin:0;
+      padding:0;
+      height:100%;
+      width:100%;
+      background:#000;
+      display:flex;
+      justify-content:center;
+      align-items:center;
+    }
+    iframe, img {
+      width:100vw;
+      height:100vh;
+      border:0;
+      object-fit:cover;
+    }
+    #errorImg { display:none; }
+  </style>
+</head>
+<body>
+  <!-- Iframe video -->
+  <iframe id="myIframe" 
+    src="https://www.blogger.com/video.g?token=AD6v5dxaiUlAFQy5kYrjGUQr-_UfRtJ3ronigB4tWNMZEvNLEWAYq7Q5iWbXdx15oWBMO49_fAafhPpTu-kmRuOjBYSZyREsFXbJccENnM2VLxEPNLjCl3b10WErzDncnDtcsHfhtMJn" 
+    allowfullscreen>
+  </iframe>
+
+  <!-- Gambar error -->
+  <img id="errorImg" src="404.jpg" alt="Video gagal dimuat">
+
+  <script>
+    const iframe = document.getElementById("myIframe");
+    const errorImg = document.getElementById("errorImg");
+    const src = iframe.getAttribute("src");
+
+    // Jika src kosong
+    if (!src || src.trim() === "" || src.endsWith("token=")) {
+      iframe.style.display = "none";
+      errorImg.style.display = "block";
+    } else {
+      // Tambahkan timeout: jika iframe gagal load, tampilkan error
+      iframe.addEventListener("error", () => {
+        iframe.style.display = "none";
+        errorImg.style.display = "block";
+      });
+    }
+  </script>
+</body>
+</html>
