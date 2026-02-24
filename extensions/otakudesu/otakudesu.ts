@@ -163,10 +163,17 @@ class Provider {
         const formData1 = new URLSearchParams()
         formData1.append("action", actionNonce)
 
+        const ajaxHeaders = {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Origin": "https://otakudesu.best",
+            "Referer": episode.url,
+            "X-Requested-With": "XMLHttpRequest"
+        }
+
         let ajaxRes = await fetch("https://otakudesu.best/wp-admin/admin-ajax.php", {
             method: "POST",
             body: formData1.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded" }
+            headers: ajaxHeaders
         })
         if (!ajaxRes.ok) throw new Error("AJAX Step 1 failed")
 
@@ -195,7 +202,7 @@ class Provider {
                 const ajaxRes2 = await fetch("https://otakudesu.best/wp-admin/admin-ajax.php", {
                     method: "POST",
                     body: formData2.toString(),
-                    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+                    headers: ajaxHeaders
                 })
                 if (!ajaxRes2.ok) continue
 
