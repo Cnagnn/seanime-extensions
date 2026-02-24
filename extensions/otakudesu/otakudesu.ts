@@ -128,9 +128,10 @@ class Provider {
 
         const html = await res.text()
 
-        // 1. Find Action strings
-        const actionNonceMatch = html.match(/data:\s*{\s*action\s*:\s*["']([a-f0-9]+)["']\s*}/)
-        const actionIframeMatch = html.match(/nonce:\s*[a-zA-Z0-9_]+,\s*action\s*:\s*["']([a-f0-9]+)["']/)
+        // 1. Extract AJAX action strings from inline script
+        // Pattern: action:"<hex>" for nonce, and action:"<hex>" for iframe
+        const actionNonceMatch = html.match(/\{action:"([a-f0-9]{20,})"}\)\.done\(\(\{data:.\}\)=>\{window\.__x__nonce/)
+        const actionIframeMatch = html.match(/action:"([a-f0-9]{20,})"}\)\.done\(\(\{data:.\}\)=>\{document/)
 
         if (!actionNonceMatch || !actionIframeMatch) {
             throw new Error("Could not find AJAX action strings")
@@ -138,35 +139,26 @@ class Provider {
         const actionNonce = actionNonceMatch[1]
         const actionIframe = actionIframeMatch[1]
 
-        // 2. Find VidHide mirror data-content
-        let selectedDataContent = ""
-        const items = html.match(/<a href="#" data-content="([^"]+)">([^<]+)<\/a>/g)
-        if (items) {
-            for (const item of items) {
-                const m = item.match(/data-content="([^"]+)">([^<]+)</)
-                if (m && m[2].toLowerCase().includes('vidhide')) {
-                    selectedDataContent = m[1]
-                    break
-                }
+        // 2. Collect ALL mirrors with data-content
+        const mirrorRegex = /data-content="([A-Za-z0-9+/=]+)"/g
+        let mirrorMatch
+        const mirrors: { dataContent: string, decoded: any }[] = []
+        while ((mirrorMatch = mirrorRegex.exec(html)) !== null) {
+            try {
+                const decoded = CryptoJS.enc.Base64.parse(mirrorMatch[1])
+                const decodedStr = CryptoJS.enc.Utf8.stringify(decoded)
+                const payload = JSON.parse(decodedStr)
+                mirrors.push({ dataContent: mirrorMatch[1], decoded: payload })
+            } catch (e) {
+                // Skip invalid entries
             }
         }
 
-        // If VidHide not found, return empty or throw error
-        if (!selectedDataContent) {
-            throw new Error("No VidHide mirror found for this episode")
+        if (mirrors.length === 0) {
+            throw new Error("No mirrors found for this episode")
         }
 
-        // 3. Decode JSON payload
-        let decodedPayload: any = {}
-        try {
-            const decoded = CryptoJS.enc.Base64.parse(selectedDataContent)
-            const decodedStr = CryptoJS.enc.Utf8.stringify(decoded)
-            decodedPayload = JSON.parse(decodedStr)
-        } catch (e) {
-            throw new Error("Failed to decode data-content base64")
-        }
-
-        // 4. AJAX Step 1 - Get Nonce
+        // 3. AJAX Step 1 - Get Nonce
         const formData1 = new URLSearchParams()
         formData1.append("action", actionNonce)
 
@@ -181,53 +173,107 @@ class Provider {
         const nonce = ajaxData1?.data
         if (!nonce) throw new Error("Failed to obtain nonce")
 
-        // 5. AJAX Step 2 - Get Iframe Base64
-        const formData2 = new URLSearchParams()
-        formData2.append("id", String(decodedPayload.id || ""))
-        formData2.append("i", String(decodedPayload.i || ""))
-        formData2.append("q", String(decodedPayload.q || ""))
-        formData2.append("nonce", nonce)
-        formData2.append("action", actionIframe)
+        // 4. Try each mirror to get a working video source
+        // Group by quality, try first mirror per quality
+        const triedQualities = new Set<string>()
 
-        ajaxRes = await fetch("https://otakudesu.best/wp-admin/admin-ajax.php", {
-            method: "POST",
-            body: formData2.toString(),
-            headers: { "Content-Type": "application/x-www-form-urlencoded" }
-        })
-        if (!ajaxRes.ok) throw new Error("AJAX Step 2 failed")
+        for (const mirror of mirrors) {
+            const q = mirror.decoded.q || "auto"
+            if (triedQualities.has(q)) continue
+            triedQualities.add(q)
 
-        const ajaxData2 = await ajaxRes.json()
-        if (!ajaxData2?.data) throw new Error("Failed to obtain iframe payload")
+            try {
+                // AJAX Step 2 - Get Iframe
+                const formData2 = new URLSearchParams()
+                formData2.append("id", String(mirror.decoded.id || ""))
+                formData2.append("i", String(mirror.decoded.i || ""))
+                formData2.append("q", String(mirror.decoded.q || ""))
+                formData2.append("nonce", nonce)
+                formData2.append("action", actionIframe)
 
-        // 6. Decode Iframe Payload
-        let iframeHtml = ""
-        try {
-            const decoded = CryptoJS.enc.Base64.parse(ajaxData2.data)
-            iframeHtml = CryptoJS.enc.Utf8.stringify(decoded)
-        } catch (e) {
-            throw new Error("Failed to decode iframe base64")
+                const ajaxRes2 = await fetch("https://otakudesu.best/wp-admin/admin-ajax.php", {
+                    method: "POST",
+                    body: formData2.toString(),
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" }
+                })
+                if (!ajaxRes2.ok) continue
+
+                const ajaxData2 = await ajaxRes2.json()
+                if (!ajaxData2?.data) continue
+
+                // Decode iframe base64
+                let iframeHtml = ""
+                try {
+                    const decoded = CryptoJS.enc.Base64.parse(ajaxData2.data)
+                    iframeHtml = CryptoJS.enc.Utf8.stringify(decoded)
+                } catch (e) { continue }
+
+                // Extract iframe src
+                const srcMatch = iframeHtml.match(/src="([^"]+)"/)
+                if (!srcMatch) continue
+                let iframeUrl = srcMatch[1]
+
+                // Fetch the iframe content
+                const iframeRes = await fetch(iframeUrl)
+                if (!iframeRes.ok) continue
+                const iframeContent = await iframeRes.text()
+
+                // Try to extract video URL from the iframe content
+                let videoUrl = ""
+                let videoType = "mp4"
+
+                // Check for blogger.com video embed
+                const bloggerMatch = iframeContent.match(/src="(https?:\/\/www\.blogger\.com\/video[^"]+)"/)
+                if (bloggerMatch) {
+                    videoUrl = bloggerMatch[1]
+                    videoType = "video"
+                }
+
+                // Check for direct m3u8/mp4 URLs
+                if (!videoUrl) {
+                    const m3u8Match = iframeContent.match(/["'](https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)["']/i)
+                    if (m3u8Match) {
+                        videoUrl = m3u8Match[1]
+                        videoType = "m3u8"
+                    }
+                }
+
+                if (!videoUrl) {
+                    const mp4Match = iframeContent.match(/["'](https?:\/\/[^"'\s]+\.mp4[^"'\s]*)["']/i)
+                    if (mp4Match) {
+                        videoUrl = mp4Match[1]
+                        videoType = "mp4"
+                    }
+                }
+
+                // Check for packed VidHide script
+                if (!videoUrl) {
+                    videoUrl = this.extractVidHideSource(iframeContent)
+                    if (videoUrl) videoType = "m3u8"
+                }
+
+                // Fallback: use the desustream iframe URL directly
+                if (!videoUrl) {
+                    videoUrl = iframeUrl
+                    videoType = "video"
+                }
+
+                if (videoUrl) {
+                    result.videoSources.push({
+                        url: videoUrl,
+                        type: videoType,
+                        quality: q,
+                        subtitles: []
+                    })
+                }
+            } catch (e) {
+                console.error("Error processing mirror:", e)
+            }
         }
 
-        // 7. Extract Iframe SRC
-        const srcMatch = iframeHtml.match(/src="([^"]+)"/)
-        if (!srcMatch) throw new Error("No src in iframe HTML")
-        const iframeUrl = srcMatch[1]
-
-        // 8. Fetch VidHide iframe html
-        const vfRes = await fetch(iframeUrl)
-        if (!vfRes.ok) throw new Error("Failed to fetch VidHide iframe")
-        const vfHtml = await vfRes.text()
-
-        // 9. Unpack and extract M3U8
-        const m3u8Url = this.extractVidHideSource(vfHtml)
-        if (!m3u8Url) throw new Error("Failed to extract m3u8 from VidHide")
-
-        result.videoSources.push({
-            url: m3u8Url,
-            type: "m3u8",
-            quality: decodedPayload.q || "auto",
-            subtitles: []
-        })
+        if (result.videoSources.length === 0) {
+            throw new Error("No streaming sources found for this episode.")
+        }
 
         return result
     }

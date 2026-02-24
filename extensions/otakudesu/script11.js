@@ -1,0 +1,1 @@
+$(document).ready(function(){$(".mirrorstream ul").click(function(){$(".mirrorstream li").slideToggle("slow");});});
