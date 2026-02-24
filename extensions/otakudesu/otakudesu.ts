@@ -120,7 +120,6 @@ class Provider {
             headers: {},
             videoSources: [],
         }
-        const dbg: string[] = []
 
         const res = await fetch(episode.url)
         if (!res.ok) {
@@ -128,7 +127,6 @@ class Provider {
         }
 
         const html = await res.text()
-        dbg.push("html:" + html.length)
 
         // 1. Extract AJAX action strings from inline script
         const actionNonceMatch = html.match(/\{action:"([a-f0-9]{20,})"\}\}\)\.done\([^)]+\)=>\{window\.__x__nonce/)
@@ -139,7 +137,6 @@ class Provider {
         }
         const actionNonce = actionNonceMatch[1]
         const actionIframe = actionIframeMatch[1]
-        dbg.push("actions:ok")
 
         // 2. Collect ALL mirrors with data-content
         const mirrorRegex = /data-content="([A-Za-z0-9+/=]+)"/g
@@ -152,14 +149,13 @@ class Provider {
                 const payload = JSON.parse(decodedStr)
                 mirrors.push({ dataContent: mirrorMatch[1], decoded: payload })
             } catch (e) {
-                dbg.push("mirror-err:" + mirrorMatch[1].substring(0, 20))
+                // Skip invalid entries
             }
         }
 
         if (mirrors.length === 0) {
-            throw new Error("No mirrors found. dbg=" + dbg.join("|"))
+            throw new Error("No mirrors found for this episode")
         }
-        dbg.push("mirrors:" + mirrors.length)
 
         // 3. AJAX Step 1 - Get Nonce
         const formData1 = new URLSearchParams()
@@ -175,12 +171,11 @@ class Provider {
             body: formData1.toString(),
             headers: ajaxHeaders
         })
-        if (!ajaxRes.ok) throw new Error("AJAX1 failed:" + ajaxRes.status)
+        if (!ajaxRes.ok) throw new Error("AJAX nonce request failed: " + ajaxRes.status)
 
         const ajaxData1 = await ajaxRes.json()
         const nonce = ajaxData1?.data
-        if (!nonce) throw new Error("No nonce. dbg=" + dbg.join("|"))
-        dbg.push("nonce:ok")
+        if (!nonce) throw new Error("Failed to obtain nonce")
 
         // 4. Try each mirror to get a working video source
         const triedQualities = new Set<string>()
@@ -203,42 +198,27 @@ class Provider {
                     body: formData2.toString(),
                     headers: ajaxHeaders
                 })
-                dbg.push("ajax2-" + q + ":" + ajaxRes2.status)
                 if (!ajaxRes2.ok) continue
 
                 const ajaxData2 = await ajaxRes2.json()
-                if (!ajaxData2?.data) {
-                    dbg.push("ajax2-nodata-" + q)
-                    continue
-                }
-                dbg.push("ajax2-data:" + String(ajaxData2.data).length)
+                if (!ajaxData2?.data) continue
 
                 // Decode iframe base64
                 let iframeHtml = ""
                 try {
                     const decoded = CryptoJS.enc.Base64.parse(ajaxData2.data)
                     iframeHtml = CryptoJS.enc.Utf8.stringify(decoded)
-                    dbg.push("iframe-html:" + iframeHtml.length)
-                } catch (e) {
-                    dbg.push("b64-err")
-                    continue
-                }
+                } catch (e) { continue }
 
                 // Extract iframe src
                 const srcMatch = iframeHtml.match(/src="([^"]+)"/)
-                if (!srcMatch) {
-                    dbg.push("no-src:" + iframeHtml.substring(0, 100))
-                    continue
-                }
+                if (!srcMatch) continue
                 let iframeUrl = srcMatch[1]
-                dbg.push("iframe-url:" + iframeUrl.substring(0, 60))
 
                 // Fetch the iframe content
                 const iframeRes = await fetch(iframeUrl)
-                dbg.push("iframe-status:" + iframeRes.status)
                 if (!iframeRes.ok) continue
                 const iframeContent = await iframeRes.text()
-                dbg.push("iframe-len:" + iframeContent.length)
 
                 // Try to extract video URL from the iframe content
                 let videoUrl = ""
@@ -249,7 +229,6 @@ class Provider {
                 if (bloggerMatch) {
                     videoUrl = bloggerMatch[1]
                     videoType = "video"
-                    dbg.push("blogger:found")
                 }
 
                 // Check for direct m3u8/mp4 URLs
@@ -258,7 +237,6 @@ class Provider {
                     if (m3u8Match) {
                         videoUrl = m3u8Match[1]
                         videoType = "m3u8"
-                        dbg.push("m3u8:found")
                     }
                 }
 
@@ -267,24 +245,19 @@ class Provider {
                     if (mp4Match) {
                         videoUrl = mp4Match[1]
                         videoType = "mp4"
-                        dbg.push("mp4:found")
                     }
                 }
 
                 // Check for packed VidHide script
                 if (!videoUrl) {
                     videoUrl = this.extractVidHideSource(iframeContent)
-                    if (videoUrl) {
-                        videoType = "m3u8"
-                        dbg.push("vidhide:found")
-                    }
+                    if (videoUrl) videoType = "m3u8"
                 }
 
                 // Fallback: use the desustream iframe URL directly
                 if (!videoUrl) {
                     videoUrl = iframeUrl
                     videoType = "video"
-                    dbg.push("fallback:iframe")
                 }
 
                 if (videoUrl) {
@@ -294,15 +267,14 @@ class Provider {
                         quality: q,
                         subtitles: []
                     })
-                    dbg.push("pushed:" + q)
                 }
-            } catch (e: any) {
-                dbg.push("catch:" + q + ":" + (e?.message || String(e)))
+            } catch (e) {
+                // Skip failed mirrors
             }
         }
 
         if (result.videoSources.length === 0) {
-            throw new Error("No sources. dbg=" + dbg.join("|"))
+            throw new Error("No streaming sources found for this episode")
         }
 
         return result
