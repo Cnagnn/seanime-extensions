@@ -1,4 +1,4 @@
-/// <reference path="./online-streaming-provider.d.ts" />
+/// <reference path="../online-streaming-provider.d.ts" />
 /// <reference path="./core.d.ts" />
 
 class Provider {
@@ -26,11 +26,11 @@ class Provider {
             return []
         }
 
-        const html = res.text()
+        const html = await res.text()
         const $ = LoadDoc(html)
         const results: SearchResult[] = []
 
-        $("article").each((_, el) => {
+        $("article").each((_: any, el: any) => {
             try {
                 // Title and URL from h2[itemprop="name"] > a
                 const titleEl = el.find("h2 a").first()
@@ -70,12 +70,12 @@ class Provider {
             throw new Error(`Failed to fetch anime page: ${res.status}`)
         }
 
-        const html = res.text()
+        const html = await res.text()
         const $ = LoadDoc(html)
         const episodes: EpisodeDetails[] = []
 
         // Episodes are in li.select-eps inside div.list_eps_stream
-        $("li.select-eps").each((_, el) => {
+        $("li.select-eps").each((_: any, el: any) => {
             try {
                 const dataAttr = el.attr("data")
                 if (!dataAttr) return
@@ -152,7 +152,7 @@ class Provider {
             throw new Error(`Failed to fetch anime page: ${res.status}`)
         }
 
-        const html = res.text()
+        const html = await res.text()
         const $ = LoadDoc(html)
 
         const result: EpisodeServer = {
@@ -165,7 +165,7 @@ class Provider {
         const targetId = `play_eps_${episodeNumber}`
         let dataAttr = ""
 
-        $("li.select-eps").each((_, el) => {
+        $("li.select-eps").each((_: any, el: any) => {
             const elId = el.attr("id") || ""
             if (elId === targetId) {
                 dataAttr = el.attr("data") || ""
@@ -176,7 +176,7 @@ class Provider {
         if (!dataAttr) {
             const allEps = $("li.select-eps")
             const targetIndex = episodeNumber - 1
-            allEps.each((i, el) => {
+            allEps.each((i: any, el: any) => {
                 if (i === targetIndex) {
                     dataAttr = el.attr("data") || ""
                 }
@@ -259,13 +259,13 @@ class Provider {
                 return ""
             }
 
-            const html = res.text()
+            const html = await res.text()
             const $ = LoadDoc(html)
 
             // Look for <source> element inside <video> tag
             let directUrl = ""
 
-            $("video source").each((_, el) => {
+            $("video source").each((_: any, el: any) => {
                 const src = el.attr("src") || ""
                 if (src && (src.includes(".mp4") || src.includes("berkasdrive") || src.includes("miterequest"))) {
                     directUrl = src
@@ -274,7 +274,7 @@ class Provider {
 
             // Fallback: try to find the src attribute on the video element itself
             if (!directUrl) {
-                $("video").each((_, el) => {
+                $("video").each((_: any, el: any) => {
                     const src = el.attr("src") || ""
                     if (src && src.length > 0) {
                         directUrl = src
