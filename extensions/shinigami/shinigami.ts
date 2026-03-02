@@ -30,89 +30,93 @@ class Provider {
         const $ = LoadDoc(html)
         const results: SearchResult[] = []
 
-        // Parse manga from search results
-        // Look for links that match series pattern
-        $("a[href*='/series/']").each((_: any, el: any) => {
-            try {
-                const href = el.attr("href") || ""
-                if (!href.includes("/series/")) return
+        // Parse manga from search results - try multiple selectors
+        // Look for common card/item patterns
+        const searchSelectors = [
+            ".manga-item", ".series-item", ".card", ".item", 
+            "[class*='manga']", "[class*='series']", "[class*='card-']",
+            "article", ".entry", ".post"
+        ]
 
-                // Extract series ID from URL
-                const seriesMatch = href.match(/\/series\/([a-f0-9\-]+)\//i)
-                if (!seriesMatch || !seriesMatch[1]) return
-
-                const seriesId = seriesMatch[1]
-                
-                // Get title from text or find title in nearby elements
-                let title = el.text().trim()
-                if (!title) {
-                    // Check if this link has an image or is wrapped in a parent with title
-                    const parent = el.parent()
-                    title = parent.find("h3, h2, h1, .title").first().text().trim()
-                    if (!title) {
-                        title = el.attr("title") || ""
-                    }
-                }
-
-                if (!title || title.length < 2) return
-
-                // Try to get cover image
-                let image = ""
-                const imgEl = el.find("img").first()
-                if (imgEl.length > 0) {
-                    image = imgEl.attr("src") || imgEl.attr("data-src") || ""
-                }
-
-                // Check if this result already exists
-                const existingResult = results.find(r => r.id === seriesId)
-                if (existingResult) return
-
-                results.push({
-                    id: seriesId,
-                    title: title,
-                    image: image,
-                })
-            } catch (e) {
-                console.error("Error parsing search result:", e)
-            }
-        })
-
-        // Fallback: if we didn't get good results, try parsing from the main search page
-        if (results.length === 0) {
-            const allSeriesUrl = `${this.api}/search`
-            const allRes = await fetch(allSeriesUrl)
-            if (allRes.ok) {
-                const allHtml = await allRes.text()
-                const all$ = LoadDoc(allHtml)
-                
-                all$("a[href*='/series/']").each((_: any, el: any) => {
+        let foundItems = false
+        for (const selector of searchSelectors) {
+            const items = $(selector)
+            if (items.length > 0) {
+                items.each((_: any, item: any) => {
                     try {
-                        const href = el.attr("href") || ""
-                        const seriesMatch = href.match(/\/series\/([a-f0-9\-]+)\//i)
-                        if (!seriesMatch || !seriesMatch[1]) return
+                        // Look for links within the item
+                        const linkEl = $(item).find("a").first()
+                        if (!linkEl.length) return
 
-                        const seriesId = seriesMatch[1]
-                        let title = el.text().trim()
-                        
+                        const href = linkEl.attr("href") || ""
+                        if (!href || href.length < 5) return
+
+                        // Extract series ID from URL - be more flexible
+                        let seriesId = ""
+                        const patterns = [
+                            /\/series\/([a-f0-9\-]+)/i,
+                            /\/manga\/([a-f0-9\-]+)/i,
+                            /\/(\w+)\/([a-f0-9\-]+)/i,
+                            /([a-f0-9\-]{8,})/i
+                        ]
+
+                        for (const pattern of patterns) {
+                            const match = href.match(pattern)
+                            if (match && match[1] && match[1].length > 5) {
+                                seriesId = match[1]
+                                break
+                            }
+                            if (match && match[2] && match[2].length > 5) {
+                                seriesId = match[2]
+                                break
+                            }
+                        }
+
+                        if (!seriesId) return
+
+                        // Get title from multiple possible sources
+                        let title = ""
+                        const titleSelectors = [
+                            "h1", "h2", "h3", "h4", ".title", ".name", 
+                            "[class*='title']", "[class*='name']", 
+                            ".manga-title", ".series-title"
+                        ]
+
+                        for (const titleSel of titleSelectors) {
+                            const titleEl = $(item).find(titleSel).first()
+                            if (titleEl.length) {
+                                title = titleEl.text().trim()
+                                if (title && title.length > 0) break
+                            }
+                        }
+
+                        // Fallback to link text
                         if (!title) {
-                            const parent = el.parent()
-                            title = parent.find("h3, h2, h1, .title").first().text().trim()
+                            title = linkEl.text().trim()
+                        }
+
+                        // Fallback to link title attribute
+                        if (!title) {
+                            title = linkEl.attr("title") || ""
                         }
 
                         if (!title || title.length < 2) return
-                        
-                        // Filter based on search query
-                        const queryLower = opts.query.toLowerCase()
-                        const titleLower = title.toLowerCase()
-                        if (!titleLower.includes(queryLower)) return
 
+                        // Get cover image
                         let image = ""
-                        const imgEl = el.find("img").first()
+                        const imgEl = $(item).find("img").first()
                         if (imgEl.length > 0) {
-                            image = imgEl.attr("src") || imgEl.attr("data-src") || ""
+                            image = imgEl.attr("src") || imgEl.attr("data-src") || 
+                                   imgEl.attr("data-lazy") || imgEl.attr("data-original") || ""
+                            
+                            // Make image URL absolute
+                            if (image && image.startsWith("/")) {
+                                image = this.api + image
+                            }
                         }
 
-                        const existingResult = results.find(r => r.id === seriesId)
+                        // Check if this result already exists
+                        const existingResult = results.find(r => r.id === seriesId || r.title === title)
                         if (existingResult) return
 
                         results.push({
@@ -120,11 +124,58 @@ class Provider {
                             title: title,
                             image: image,
                         })
+
+                        foundItems = true
                     } catch (e) {
-                        console.error("Error parsing fallback search result:", e)
+                        console.error("Error parsing search result:", e)
                     }
                 })
+
+                if (foundItems && results.length > 0) break
             }
+        }
+
+        // If still no results, try a broader approach
+        if (results.length === 0) {
+            // Look for any links that might be manga series
+            $("a").each((_: any, el: any) => {
+                try {
+                    const href = el.attr("href") || ""
+                    if (!href || href.length < 10) return
+
+                    // Check if URL looks like a manga/series page
+                    if (href.includes("series") || href.includes("manga") || 
+                        href.match(/[a-f0-9\-]{8,}/i)) {
+                        
+                        let seriesId = ""
+                        const uuidMatch = href.match(/([a-f0-9\-]{8,})/i)
+                        if (uuidMatch && uuidMatch[1]) {
+                            seriesId = uuidMatch[1]
+                        }
+
+                        if (!seriesId) return
+
+                        let title = el.text().trim() || el.attr("title") || ""
+                        if (!title || title.length < 2) return
+
+                        // Filter based on search query
+                        const queryLower = opts.query.toLowerCase()
+                        const titleLower = title.toLowerCase()
+                        if (!titleLower.includes(queryLower)) return
+
+                        const existingResult = results.find(r => r.id === seriesId)
+                        if (existingResult) return
+
+                        results.push({
+                            id: seriesId,
+                            title: title,
+                            image: "",
+                        })
+                    }
+                } catch (e) {
+                    console.error("Error in fallback search:", e)
+                }
+            })
         }
 
         return results.slice(0, 20) // Limit to first 20 results
