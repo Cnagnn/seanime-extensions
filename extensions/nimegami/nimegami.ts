@@ -30,32 +30,146 @@ class Provider {
         const $ = LoadDoc(html)
         const results: SearchResult[] = []
 
-        $("article").each((_: any, el: any) => {
-            try {
-                // Title and URL from h2[itemprop="name"] > a
-                const titleEl = el.find("h2 a").first()
-                const title = titleEl.text().trim()
-                const articleUrl = titleEl.attr("href") || ""
+        // Try multiple selectors for better compatibility
+        const searchSelectors = [
+            "article", ".entry", ".post", ".anime-item", ".item", 
+            ".card", "[class*='post']", "[class*='entry']", "[class*='anime']"
+        ]
 
-                if (!title || !articleUrl) return
+        let foundItems = false
+        for (const selector of searchSelectors) {
+            const items = $(selector)
+            if (items.length > 0) {
+                items.each((_: any, el: any) => {
+                    try {
+                        // Try multiple ways to find title and link
+                        let title = ""
+                        let articleUrl = ""
 
-                // Extract the slug from the URL to use as ID
-                // e.g. https://nimegami.id/tensei-shitara-slime-datta-ken-sub-indo-5/
-                const slug = this.extractSlug(articleUrl)
-                if (!slug) return
+                        // Method 1: h2 > a (original approach)
+                        const titleEl = $(el).find("h2 a").first()
+                        if (titleEl.length) {
+                            title = titleEl.text().trim()
+                            articleUrl = titleEl.attr("href") || ""
+                        }
 
-                results.push({
-                    id: slug,
-                    title: title,
-                    url: articleUrl,
-                    subOrDub: "sub",
+                        // Method 2: Any heading with link
+                        if (!title || !articleUrl) {
+                            const headings = $(el).find("h1 a, h2 a, h3 a, h4 a").first()
+                            if (headings.length) {
+                                title = headings.text().trim()
+                                articleUrl = headings.attr("href") || ""
+                            }
+                        }
+
+                        // Method 3: Any link with title-like class
+                        if (!title || !articleUrl) {
+                            const titleLink = $(el).find("a[class*='title'], a[class*='name']").first()
+                            if (titleLink.length) {
+                                title = titleLink.text().trim()
+                                articleUrl = titleLink.attr("href") || ""
+                            }
+                        }
+
+                        // Method 4: First link in the element
+                        if (!title || !articleUrl) {
+                            const firstLink = $(el).find("a").first()
+                            if (firstLink.length) {
+                                const linkText = firstLink.text().trim()
+                                const linkHref = firstLink.attr("href") || ""
+                                
+                                // Only use if it looks like an anime title (not "Read More", etc.)
+                                if (linkText && linkHref && linkText.length > 3 && 
+                                    !linkText.toLowerCase().includes("read") && 
+                                    !linkText.toLowerCase().includes("more") &&
+                                    !linkText.toLowerCase().includes("continue")) {
+                                    title = linkText
+                                    articleUrl = linkHref
+                                }
+                            }
+                        }
+
+                        // Method 5: Look for title in element text or attributes
+                        if (!title) {
+                            const titleFromAttr = $(el).attr("title") || $(el).find("[title]").first().attr("title") || ""
+                            if (titleFromAttr && titleFromAttr.trim().length > 3) {
+                                title = titleFromAttr.trim()
+                            }
+                        }
+
+                        if (!title || !articleUrl || title.length < 3) return
+
+                        // Clean up title - remove common prefixes/suffixes
+                        title = title.replace(/^(watch|nonton)\s+/i, "")
+                        title = title.replace(/\s+(sub\s+indo?|subtitle\s+indonesia?)$/i, "")
+                        title = title.trim()
+
+                        if (title.length < 2) return
+
+                        // Extract the slug from the URL to use as ID
+                        const slug = this.extractSlug(articleUrl)
+                        if (!slug || slug.length < 2) return
+
+                        // Check for duplicates
+                        const existingResult = results.find(r => r.id === slug || r.title === title)
+                        if (existingResult) return
+
+                        results.push({
+                            id: slug,
+                            title: title,
+                            url: articleUrl,
+                            subOrDub: "sub",
+                        })
+
+                        foundItems = true
+                    } catch (e) {
+                        console.error("Error parsing search result:", e)
+                    }
                 })
-            } catch (e) {
-                console.error("Error parsing search result:", e)
-            }
-        })
 
-        return results
+                if (foundItems && results.length > 0) break
+            }
+        }
+
+        // Fallback: if no results found, try a broader search
+        if (results.length === 0) {
+            $("a").each((_: any, el: any) => {
+                try {
+                    const href = $(el).attr("href") || ""
+                    const linkText = $(el).text().trim()
+
+                    if (!href || !linkText || linkText.length < 3) return
+                    if (href.indexOf(this.baseUrl) === -1 && !href.startsWith("/")) return
+
+                    // Check if link text contains search query
+                    const queryLower = opts.query.toLowerCase()
+                    const textLower = linkText.toLowerCase()
+                    if (!textLower.includes(queryLower)) return
+
+                    // Skip common non-anime links
+                    if (textLower.includes("home") || textLower.includes("about") ||
+                        textLower.includes("contact") || textLower.includes("read more") ||
+                        textLower.includes("continue") || textLower.includes("comment")) return
+
+                    const slug = this.extractSlug(href)
+                    if (!slug || slug.length < 2) return
+
+                    const existingResult = results.find(r => r.id === slug)
+                    if (existingResult) return
+
+                    results.push({
+                        id: slug,
+                        title: linkText,
+                        url: href.startsWith("http") ? href : this.baseUrl + href,
+                        subOrDub: "sub",
+                    })
+                } catch (e) {
+                    console.error("Error in fallback search:", e)
+                }
+            })
+        }
+
+        return results.slice(0, 15) // Limit results
     }
 
     /**
