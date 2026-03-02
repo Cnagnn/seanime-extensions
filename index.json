@@ -2,7 +2,7 @@
   {
     "id": "nimegami",
     "name": "Nimegami",
-    "description": "Nimegami.id is an Indonesian anime streaming provider with Sub Indo content",
+    "description": "Nimegami is an Indonesian anime streaming provider with Sub Indo content",
     "manifestURI": "https://raw.githubusercontent.com/Cnagnn/seanime-extensions/refs/heads/main/extensions/nimegami/nimegami.json",
     "version": "1.0.0",
     "author": "Cnagnn",
@@ -14,7 +14,7 @@
   {
     "id": "shinigami",
     "name": "Shinigami",
-    "description": "Shinigami.asia is an Indonesian manga reading provider with Indonesian translation content",
+    "description": "Shinigami is an Indonesian manga reading provider with Indonesian translation content",
     "manifestURI": "https://raw.githubusercontent.com/Cnagnn/seanime-extensions/refs/heads/main/extensions/shinigami/shinigami.json",
     "version": "1.0.0",
     "author": "Cnagnn",
